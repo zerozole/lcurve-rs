@@ -10,11 +10,14 @@ pub mod geometry;
 pub mod flux;
 pub mod lightcurve;
 pub mod passband;
+pub mod lsst_tables;
 pub mod marching;
 pub mod analytic;
 
 pub use params::EBParams;
 pub use passband::Passband;
+pub use passband::BandMode;
+pub use flux::EclipseAcc;
 pub use lightcurve::compute_lightcurve;
 pub use analytic::compute_analytic;
 

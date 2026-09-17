@@ -28,6 +28,50 @@ pub fn line_of_sight(phase: f64, inclination_rad: f64) -> Vec3 {
     )
 }
 
+
+/// How the line-of-sight eclipse search picks its convergence tolerance.
+///
+/// `fblink` runs `while step_size > acc`, and `step_size` starts as the chord
+/// through the eclipsing star's reference sphere. With `Fixed` the tolerance is
+/// 0.05 regardless, so once the eclipser's radius falls below about 0.025 that
+/// loop never executes and every element is reported unobscured: the eclipse
+/// disappears rather than becoming imprecise. Measured on a detached pair with
+/// r1 = 0.04 and r2 = 0.025, `Fixed` gives a 0.033 mag curve where PHOEBE gives
+/// a 0.546 mag eclipse, and `Scaled` gives 0.563.
+///
+/// `Fixed` is the default so existing behaviour is unchanged. Set
+/// PHOEBE_RS_ECLIPSE_ACC=scaled to tie the tolerance to the eclipser's size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EclipseAcc {
+    Fixed,
+    Scaled,
+}
+
+impl Default for EclipseAcc {
+    fn default() -> Self { EclipseAcc::Fixed }
+}
+
+impl EclipseAcc {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "fixed" | "legacy" | "0.05" => Some(EclipseAcc::Fixed),
+            "scaled" | "adaptive" | "radius" => Some(EclipseAcc::Scaled),
+            _ => None,
+        }
+    }
+}
+
+static ECLIPSE_MODE: std::sync::OnceLock<EclipseAcc> = std::sync::OnceLock::new();
+
+/// Read once; this is called per surface element per phase.
+fn eclipse_mode() -> EclipseAcc {
+    *ECLIPSE_MODE.get_or_init(|| {
+        std::env::var("PHOEBE_RS_ECLIPSE_ACC").ok()
+            .and_then(|v| EclipseAcc::from_str(&v))
+            .unwrap_or_default()
+    })
+}
+
 /// Compute flux from one star at a given orbital phase.
 ///
 /// Uses proper Roche geometry eclipse checking via `fblink`.
@@ -68,7 +112,18 @@ pub fn star_flux(
     let sb_self = sb_table.eval(t_eff);
     let l_ratio = if sb_self > 0.0 { sb_companion / sb_self } else { 0.0 };
 
-    let eclipse_acc = 0.05;
+    let eclipse_acc = match eclipse_mode() {
+        EclipseAcc::Fixed => 0.05,
+        EclipseAcc::Scaled => {
+            let rl = match eclipser {
+                Star::Primary =>
+                    lcurve_roche::lagrange::xl11(q, 1.0).unwrap_or(0.3),
+                Star::Secondary =>
+                    1.0 - lcurve_roche::lagrange::xl12(q, 1.0).unwrap_or(0.7),
+            };
+            (0.05f64).min(0.1 * eclipser_fillout * rl).max(1e-5)
+        }
+    };
 
     for elem in &mesh.elements {
         let cos_gamma = elem.normal.x * los.x
