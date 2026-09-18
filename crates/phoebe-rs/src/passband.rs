@@ -44,9 +44,8 @@ impl BandMode {
     }
 }
 
-use crate::lsst_tables::{LAM_LO_NM, LAM_STEP_NM, NLAM, LSST_PIVOT_NM,
-                        LSST_U, LSST_G, LSST_R, LSST_I,
-                        LSST_Z, LSST_Y};
+use crate::lsst_tables::{LAM_LO_NM, LAM_STEP_NM, NLAM, lsst_curve,
+                        lsst_pivot_nm};
 
 /// Available passbands.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -138,7 +137,7 @@ pub fn surface_brightness_mode(t_eff: f64, passband: Passband,
     if mode == BandMode::Effective {
         if let Some(i) = lsst_index(passband) {
             // one Planck evaluation at the pivot wavelength, no integral
-            return planck(LSST_PIVOT_NM[i] * 1e-9, t_eff);
+            return planck(lsst_pivot_nm(i) * 1e-9, t_eff);
         }
     }
     match passband {
@@ -147,7 +146,8 @@ pub fn surface_brightness_mode(t_eff: f64, passband: Passband,
             t_eff.powi(4)
         },
         _ if lsst_table(passband).is_some() => {
-            // Tabulated LSST response on a uniform 1 nm grid. Photon counting,
+            // Tabulated LSST response on the sncosmo 0.1 nm grid. Photon
+            // counting,
             // so the weight carries an extra lambda: an LSST CCD registers
             // photons, and B_lambda is an energy density.
             let tab = lsst_table(passband).unwrap();
@@ -217,17 +217,10 @@ fn transmission(lam_nm: f64, passband: Passband) -> f64 {
 /// The tabulated throughput for an LSST band, or None for every other band.
 ///
 /// This is the switch that keeps the monochromatic and ZTF/Johnson paths
-/// exactly as they were: they return None and fall through to `gauss`.
-pub fn lsst_table(passband: Passband) -> Option<&'static [f64; NLAM]> {
-    match passband {
-        Passband::LsstU => Some(&LSST_U),
-        Passband::LsstG => Some(&LSST_G),
-        Passband::LsstR => Some(&LSST_R),
-        Passband::LsstI => Some(&LSST_I),
-        Passband::LsstZ => Some(&LSST_Z),
-        Passband::LsstY => Some(&LSST_Y),
-        _ => None,
-    }
+/// exactly as they were: they return None and fall through to the Gaussian
+/// approximations.
+pub fn lsst_table(passband: Passband) -> Option<&'static [f64]> {
+    lsst_index(passband).map(lsst_curve)
 }
 
 /// Precomputed surface brightness lookup table for fast evaluation.
